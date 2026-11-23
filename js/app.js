@@ -1,13 +1,17 @@
 (() => {
   'use strict';
   const STORAGE_KEY = 'manholeMap.collected.v1';
+  const ADMIN_KEY = 'manholeMap.admin';
+  const GH_KEY = 'manholeMap.gh.v1';
+  const CSV_PATH = 'data/cards.csv';
   // OpenStreetMapデータのベクタ地図（OpenFreeMap、APIキー不要）。bright以外に liberty / positron も指定できる
   const STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
   const KIND = { dist: 'カード配布場所', lid: 'マンホール蓋の設置場所' };
   const FIELD = { dist: 'distribution', lid: 'lid' };
   const STATUS = { verified: '確認済み', unverified: '未確認', sample: '架空（サンプル）' };
   const $ = (s) => document.querySelector(s);
-  const state = { mode: 'dist', cards: [], collected: new Set(), pins: { dist: [], lid: [] }, selected: null, me: null, watching: false, photos: {}, blobs: {} };
+  const state = { mode: 'dist', cards: [], csv: null, collected: new Set(), pins: { dist: [], lid: [] }, selected: null,
+    me: null, watching: false, photos: {}, blobs: {}, admin: false, editId: null };
   let map, toastTimer, tileErrorShown = false;
 
   function toast(msg, sticky) {
@@ -18,6 +22,7 @@
     if (!sticky) toastTimer = setTimeout(() => { t.hidden = true; }, 6000);
   }
 
+  /* ---------- 取得済み (LocalStorage) ---------- */
   function loadCollected() {
     try {
       const a = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -37,7 +42,10 @@
   const validPlace = (p) => !!p && Number.isFinite(p.lat) && Number.isFinite(p.lng) &&
     Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
   const safeUrl = (u) => /^https?:\/\//i.test(u || '') ? u : '';
+  const safeName = (id) => String(id).replace(/[\\/:*?"<>|]/g, '_');
+  const today = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
 
+  /* ---------- CSV ---------- */
   const COLS = { id: 'カードID', name: 'カード名称', pref: '都道府県', city: '市区町村', series: '弾数', img: 'カード画像URL',
     dName: '配布場所名称', dAddr: '配布場所住所', dLat: '配布場所緯度', dLng: '配布場所経度',
     lName: '蓋設置場所名称', lAddr: '蓋設置場所住所', lLat: '蓋緯度', lLng: '蓋経度',
@@ -58,32 +66,38 @@
     if (f !== '' || row.length) { row.push(f); rows.push(row); }
     return rows;
   }
-
-  async function fetchText(url) {
-    const res = await fetch(url, { cache: 'no-cache' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const buf = await res.arrayBuffer();
-    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^\uFEFF/, ''); }
-    catch (e) { return new TextDecoder('shift_jis').decode(buf); } // Excelの通常CSV(Shift_JIS)対策
+  function decodeBytes(u8) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(u8).replace(/^\uFEFF/, ''); }
+    catch (e) { return new TextDecoder('shift_jis').decode(u8); } // Excelの通常CSV(Shift_JIS)対策
   }
-
-  async function loadCards() {
-    const rows = parseCsv(await fetchText('data/cards.csv')).filter((r) => r.some((c) => c.trim()));
+  function parseToCsv(text) {
+    const rows = parseCsv(text).filter((r) => r.some((c) => c.trim()));
     if (!rows.length) throw new Error('CSVが空です');
-    const head = rows[0].map((h) => h.trim());
-    const idx = {};
-    Object.keys(COLS).forEach((k) => { idx[k] = head.indexOf(COLS[k]); });
+    return { head: rows[0].map((h) => h.trim()), rows: rows.slice(1) };
+  }
+  const colIdx = (head) => { const o = {}; Object.keys(COLS).forEach((k) => { o[k] = head.indexOf(COLS[k]); }); return o; };
+  const newCsv = () => ({ head: Object.keys(COLS).map((k) => COLS[k]), rows: [] });
+  function ensureColumns(csv) {
+    Object.keys(COLS).forEach((k) => {
+      if (csv.head.indexOf(COLS[k]) < 0) { csv.head.push(COLS[k]); csv.rows.forEach((r) => { while (r.length < csv.head.length) r.push(''); }); }
+    });
+  }
+  const esc = (v) => (/[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  const toCsv = (csv) => '\uFEFF' + [csv.head].concat(csv.rows)
+    .map((r) => csv.head.map((_, i) => esc(String(r[i] === undefined ? '' : r[i]))).join(',')).join('\r\n') + '\r\n';
+
+  function buildCards(csv) {
+    const idx = colIdx(csv.head);
     const missing = ['id', 'name', 'dLat', 'dLng'].filter((k) => idx[k] < 0).map((k) => COLS[k]);
     if (missing.length) throw new Error('必須の列がありません: ' + missing.join('、'));
-    const num = (v) => parseFloat(v);
     const cards = [], bad = [], seen = new Set();
-    rows.slice(1).forEach((r, n) => {
+    csv.rows.forEach((r, n) => {
       const g = (k) => (idx[k] < 0 ? '' : String(r[idx[k]] || '').trim());
       const id = g('id');
-      const dist = { name: g('dName'), address: g('dAddr'), lat: num(g('dLat')), lng: num(g('dLng')) };
+      const dist = { name: g('dName'), address: g('dAddr'), lat: parseFloat(g('dLat')), lng: parseFloat(g('dLng')) };
       if (!id || seen.has(id) || !validPlace(dist)) { bad.push(n + 2); return; }
       seen.add(id);
-      const lid = { name: g('lName'), address: g('lAddr'), lat: num(g('lLat')), lng: num(g('lLng')) };
+      const lid = { name: g('lName'), address: g('lAddr'), lat: parseFloat(g('lLat')), lng: parseFloat(g('lLng')) };
       cards.push({
         id, name: g('name') || id, prefecture: g('pref'), city: g('city'), series: g('series'), imageUrl: g('img'),
         distribution: dist, lid: validPlace(lid) ? lid : null, sourceUrl: g('src'), checkedAt: g('checked'),
@@ -94,7 +108,59 @@
     return { cards, bad };
   }
 
-  /* ---- 写真（この端末のIndexedDBに保存） ---- */
+  /* ---------- GitHub（作成者モードのみ） ---------- */
+  const getGh = () => {
+    try { const g = JSON.parse(localStorage.getItem(GH_KEY) || 'null'); return g && g.owner && g.repo && g.token ? g : null; }
+    catch (e) { return null; }
+  };
+  const b64ToBytes = (b64) => Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0));
+  const blobToB64 = (b) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1]);
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(b);
+  });
+  const ghUrl = (g, path) => 'https://api.github.com/repos/' + encodeURIComponent(g.owner) + '/' + encodeURIComponent(g.repo) +
+    '/contents/' + path.split('/').map(encodeURIComponent).join('/');
+  const ghHeaders = (g) => ({ Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + g.token });
+  function ghErr(res) {
+    return res.status === 401 ? 'トークンが無効か期限切れです'
+      : res.status === 403 ? '権限不足、またはアクセス制限です'
+      : res.status === 404 ? 'リポジトリが見つかりません（名前・トークンの対象リポジトリ・権限を確認）'
+      : res.status === 409 || res.status === 422 ? '更新が競合しました。もう一度お試しください'
+      : 'GitHub エラー ' + res.status;
+  }
+  async function ghGet(g, path) {
+    const res = await fetch(ghUrl(g, path) + '?ref=' + encodeURIComponent(g.branch || 'main'), { headers: ghHeaders(g), cache: 'no-store' });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(ghErr(res));
+    return res.json();
+  }
+  async function ghPut(g, path, b64, sha, message) {
+    const body = { message, content: b64, branch: g.branch || 'main' };
+    if (sha) body.sha = sha;
+    const res = await fetch(ghUrl(g, path), { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, ghHeaders(g)), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(ghErr(res));
+    return res.json();
+  }
+  async function ghGetCsv(g) {
+    const f = await ghGet(g, CSV_PATH);
+    if (!f) return { csv: newCsv(), sha: null };
+    if (!f.content) throw new Error('CSVが大きすぎてAPIで取得できません');
+    return { csv: parseToCsv(decodeBytes(b64ToBytes(f.content))), sha: f.sha };
+  }
+  async function loadCsv() {
+    const gh = state.admin ? getGh() : null;
+    if (gh) {
+      try { const r = await ghGetCsv(gh); if (r.sha) return r.csv; }
+      catch (e) { toast('GitHubから最新データを取得できませんでした（' + e.message + '）。公開中のデータを表示します。'); }
+    }
+    const res = await fetch(CSV_PATH, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return parseToCsv(decodeBytes(new Uint8Array(await res.arrayBuffer())));
+  }
+
+  /* ---------- 写真 ---------- */
   let dbp;
   const idb = () => dbp || (dbp = new Promise((res, rej) => {
     const r = indexedDB.open('manholeMap', 1);
@@ -135,10 +201,32 @@
       im.src = url;
     });
   }
-  const safeName = (id) => String(id).replace(/[\\/:*?"<>|]/g, '_');
+  // 画像の優先順位: この画面で撮った写真 → images/cards/<ID>.jpg → CSVのカード画像URL
+  function loadImg(img, card, done) {
+    const list = [state.photos[String(card.id)], 'images/cards/' + encodeURIComponent(safeName(card.id)) + '.jpg', card.imageUrl].filter(Boolean);
+    let i = 0;
+    img.style.display = '';
+    img.onload = () => { if (done) done(false); };
+    img.onerror = () => { i++; if (i < list.length) img.src = list[i]; else { img.style.display = 'none'; if (done) done(true); } };
+    img.src = list[0];
+  }
+  function setPhoto(id, blob, track) {
+    id = String(id);
+    if (state.photos[id]) URL.revokeObjectURL(state.photos[id]);
+    state.photos[id] = URL.createObjectURL(blob);
+    if (track) {
+      state.blobs[id] = blob;
+      $('#backup').hidden = false;
+      $('#backup-n').textContent = Object.keys(state.blobs).length;
+    }
+    state.pins.dist.forEach((p) => { if (String(p.id) === id) loadImg(p.img, p.card, (f) => p.el.classList.toggle('noimg', f)); });
+    if (state.selected && String(state.selected.id) === id) openSheet(state.selected.id, state.selected.kind, false);
+  }
+
+  /* ---- 端末内の写真をZIPでダウンロード（GitHub未設定時の予備） ---- */
   const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
   const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
-  function makeZip(files) { // 無圧縮ZIP（JPEGは既に圧縮済みのため）
+  function makeZip(files) {
     const enc = new TextEncoder(), parts = [], central = [];
     let offset = 0;
     const d = new Date();
@@ -162,39 +250,27 @@
     const end = new DataView(new ArrayBuffer(22));
     end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
     end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
-    return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+    return new Blob(parts.concat(central, [new Uint8Array(end.buffer)]), { type: 'application/zip' });
   }
   async function downloadPhotos() {
     const ids = Object.keys(state.blobs);
-    if (!ids.length) return toast('保存した写真がありません。');
+    if (!ids.length) return toast('端末に保存した写真がありません。');
     try {
       const files = [];
       for (const id of ids) files.push({ name: 'images/cards/' + safeName(id) + '.jpg', data: new Uint8Array(await state.blobs[id].arrayBuffer()) });
       const url = URL.createObjectURL(makeZip(files));
-      const d = new Date(), pad = (n) => String(n).padStart(2, '0');
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'manhole-photos-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.zip';
+      a.download = 'manhole-photos-' + today().replace(/-/g, '') + '.zip';
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
-      toast(ids.length + '枚の写真をZIPにしました。展開した images フォルダを、プロジェクトの images フォルダに入れて再アップロードしてください。');
+      toast(ids.length + '枚の写真をZIPにしました。展開した images フォルダをリポジトリの images フォルダに追加してください。');
     } catch (e) {
       toast('ダウンロード用ZIPの作成に失敗しました。');
     }
   }
-  const cardImg = (c) => state.photos[String(c.id)] || c.imageUrl || 'images/cards/' + encodeURIComponent(c.id) + '.jpg';
-  function setPhoto(id, blob) {
-    id = String(id);
-    if (state.photos[id]) URL.revokeObjectURL(state.photos[id]);
-    const url = URL.createObjectURL(blob);
-    state.photos[id] = url;
-    state.blobs[id] = blob;
-    $('#backup').hidden = false;
-    $('#backup-n').textContent = Object.keys(state.blobs).length;
-    state.pins.dist.forEach((p) => { if (String(p.id) === id) { p.img.style.display = ''; p.el.classList.remove('noimg'); p.img.src = url; } });
-    if (state.selected && String(state.selected.id) === id) openSheet(state.selected.id, state.selected.kind, false);
-  }
 
+  /* ---------- ピン ---------- */
   function addPin(kind, card) {
     const place = card[FIELD[kind]];
     if (!validPlace(place)) return;
@@ -206,14 +282,13 @@
     if (kind === 'dist') {
       img = new Image();
       img.alt = '';
-      img.src = cardImg(card);
-      img.addEventListener('error', () => { img.style.display = 'none'; el.classList.add('noimg'); });
+      loadImg(img, card, (f) => el.classList.toggle('noimg', f));
       el.appendChild(img);
     }
     el.addEventListener('click', (e) => { e.stopPropagation(); openSheet(card.id, kind, true); });
     const marker = new maplibregl.Marker({ element: el, anchor: kind === 'dist' ? 'bottom' : 'center' })
       .setLngLat([place.lng, place.lat]);
-    state.pins[kind].push({ id: card.id, el, img, marker, lat: place.lat });
+    state.pins[kind].push({ id: card.id, card, el, img, marker, lat: place.lat });
   }
 
   function refreshPins() {
@@ -234,6 +309,15 @@
     state.pins[mode].forEach((p) => p.marker.addTo(map));
   }
 
+  function renderPins() {
+    ['dist', 'lid'].forEach((k) => state.pins[k].forEach((p) => p.marker.remove()));
+    state.pins = { dist: [], lid: [] };
+    state.cards.forEach((c) => { addPin('dist', c); addPin('lid', c); });
+    setMode(state.mode);
+    refreshPins();
+  }
+
+  /* ---------- 詳細パネル ---------- */
   const narrow = () => window.matchMedia('(max-width:759px)').matches;
   const setSheetHeight = () => {
     document.documentElement.style.setProperty('--sheet-h', narrow() && !$('#sheet').hidden ? $('#sheet').offsetHeight + 'px' : '0px');
@@ -246,9 +330,7 @@
     state.selected = { id, kind };
     if (state.mode !== kind) setMode(kind);
 
-    const img = $('#d-img');
-    img.src = cardImg(card);
-    img.onerror = () => { img.removeAttribute('src'); };
+    loadImg($('#d-img'), card);
     $('#d-kind').textContent = KIND[kind];
     $('#d-kind').className = 'kind ' + kind;
     $('#d-name').textContent = card.name || '';
@@ -285,7 +367,7 @@
     if (fly) {
       map.easeTo({
         center: [place.lng, place.lat],
-        zoom: Math.max(map.getZoom(), 15),
+        zoom: Math.max(map.getZoom(), 14),
         offset: narrow() ? [0, -Math.round(window.innerHeight * 0.2)] : [190, 0],
         duration: 500
       });
@@ -299,6 +381,7 @@
     refreshPins();
   }
 
+  /* ---------- 現在地 ---------- */
   function showMe(pos) {
     const ll = [pos.coords.longitude, pos.coords.latitude];
     if (!state.me) {
@@ -316,7 +399,7 @@
     btn.classList.add('busy');
     navigator.geolocation.getCurrentPosition((pos) => {
       btn.classList.remove('busy');
-      map.flyTo({ center: showMe(pos), zoom: Math.max(map.getZoom(), 15) });
+      map.flyTo({ center: showMe(pos), zoom: Math.max(map.getZoom(), 14) });
       if (!state.watching) {
         state.watching = true;
         navigator.geolocation.watchPosition(showMe, () => {}, { enableHighAccuracy: true, maximumAge: 10000 });
@@ -330,15 +413,192 @@
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
   }
 
+  /* ---------- 作成者モード: カードの追加・編集 ---------- */
+  const FORM = [
+    { k: 'id', label: 'カードID *（半角英数字・ハイフン。後から変更不可）' }, { k: 'name', label: 'カード名称 *' },
+    { k: 'pref', label: '都道府県' }, { k: 'city', label: '市区町村' }, { k: 'series', label: '弾数' },
+    { h: 'カード配布場所' },
+    { k: 'dName', label: '名称' }, { k: 'dAddr', label: '住所' },
+    { k: 'dLat', label: '緯度 *（「緯度,経度」をまとめて貼り付け可）', num: 1 }, { k: 'dLng', label: '経度 *', num: 1 },
+    { gps: 'd' }, { k: 'dSt', label: '座標の確認状況', sel: 1 },
+    { h: 'マンホール蓋の設置場所（不明なら空欄）' },
+    { k: 'lName', label: '名称' }, { k: 'lAddr', label: '住所' },
+    { k: 'lLat', label: '緯度', num: 1 }, { k: 'lLng', label: '経度', num: 1 },
+    { gps: 'l', same: 1 }, { k: 'lSt', label: '座標の確認状況', sel: 1 },
+    { h: 'その他' },
+    { k: 'src', label: '出典URL' }, { k: 'checked', label: '情報確認日（例: 2026-11-22）' }
+  ];
+  const fEl = (k) => $('#ed-body [name="' + k + '"]');
+  const fVal = (k) => fEl(k).value.trim();
+  const fSet = (k, v) => { fEl(k).value = v; };
+  function mkBtn(text, fn) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn'; b.textContent = text; b.addEventListener('click', fn);
+    return b;
+  }
+  function fillGps(p) {
+    if (!('geolocation' in navigator)) { $('#ed-err').textContent = 'この端末では現在地を取得できません。'; return; }
+    navigator.geolocation.getCurrentPosition((pos) => {
+      fSet(p + 'Lat', pos.coords.latitude.toFixed(6));
+      fSet(p + 'Lng', pos.coords.longitude.toFixed(6));
+    }, () => { $('#ed-err').textContent = '現在地を取得できませんでした。'; }, { enableHighAccuracy: true, timeout: 15000 });
+  }
+  function buildForm(init) {
+    const body = $('#ed-body');
+    body.textContent = '';
+    FORM.forEach((f) => {
+      if (f.h) { const h = document.createElement('h4'); h.textContent = f.h; body.appendChild(h); return; }
+      if (f.gps) {
+        const row = document.createElement('div');
+        row.className = 'actions';
+        row.appendChild(mkBtn('現在地を入力', () => fillGps(f.gps)));
+        if (f.same) row.appendChild(mkBtn('配布場所と同じ座標', () => { fSet('lLat', fVal('dLat')); fSet('lLng', fVal('dLng')); }));
+        body.appendChild(row);
+        return;
+      }
+      const lab = document.createElement('label');
+      lab.className = 'f';
+      const sp = document.createElement('span');
+      sp.textContent = f.label;
+      lab.appendChild(sp);
+      let inp;
+      if (f.sel) {
+        inp = document.createElement('select');
+        ['', '未確認', '確認済み', '架空'].forEach((o) => { const op = document.createElement('option'); op.value = o; op.textContent = o || '（未選択）'; inp.appendChild(op); });
+      } else {
+        inp = document.createElement('input');
+        inp.type = 'text'; inp.autocomplete = 'off';
+        if (f.num) inp.inputMode = 'decimal';
+      }
+      inp.name = f.k;
+      inp.value = init[f.k] || '';
+      if (f.k === 'id' && state.editId != null) inp.readOnly = true;
+      if (f.k === 'dLat' || f.k === 'lLat') {
+        inp.addEventListener('change', () => {
+          const m = inp.value.match(/(-?\d+(?:\.\d+)?)\s*[,、\s]\s*(-?\d+(?:\.\d+)?)/);
+          if (m) { inp.value = m[1]; fSet(f.k === 'dLat' ? 'dLng' : 'lLng', m[2]); }
+        });
+      }
+      lab.appendChild(inp);
+      body.appendChild(lab);
+    });
+  }
+  function openEditor(id) {
+    if (!state.admin) return;
+    const csv = state.csv || newCsv();
+    const idx = colIdx(csv.head);
+    state.editId = id == null ? null : String(id);
+    let init = {};
+    if (state.editId != null) {
+      const row = csv.rows.find((r) => String(r[idx.id] || '').trim() === state.editId);
+      Object.keys(COLS).forEach((k) => { init[k] = row && idx[k] >= 0 ? String(row[idx[k]] || '') : ''; });
+    } else {
+      const c = map.getCenter();
+      init = { id: 'card-' + Date.now().toString(36), dLat: c.lat.toFixed(6), dLng: c.lng.toFixed(6), dSt: '未確認', checked: today() };
+    }
+    $('#ed-title').textContent = state.editId != null ? 'カードを編集' : 'カードを追加（地図の中心が配布場所の座標に入ります）';
+    $('#ed-del').hidden = state.editId == null;
+    $('#ed-err').textContent = '';
+    buildForm(init);
+    $('#editor').showModal();
+  }
+  function applyValues(csv, id, vals, remove) {
+    ensureColumns(csv);
+    const idx = colIdx(csv.head);
+    let ri = csv.rows.findIndex((r) => String(r[idx.id] || '').trim() === id);
+    if (remove) { if (ri >= 0) csv.rows.splice(ri, 1); return; }
+    if (ri < 0) { csv.rows.push(csv.head.map(() => '')); ri = csv.rows.length - 1; }
+    Object.keys(vals).forEach((k) => { csv.rows[ri][idx[k]] = vals[k]; });
+  }
+  async function saveCard(remove) {
+    const err = $('#ed-err');
+    err.textContent = '';
+    const vals = {};
+    FORM.forEach((f) => { if (f.k) vals[f.k] = fVal(f.k); });
+    const isNew = state.editId == null;
+    const id = isNew ? vals.id : state.editId;
+    if (!remove) {
+      if (!id) { err.textContent = 'カードIDを入力してください。'; return; }
+      if (isNew && !/^[\w.\-]+$/.test(id)) { err.textContent = 'カードIDは半角英数字・ハイフン・アンダースコア・ドットだけにしてください。'; return; }
+      if (!vals.name) { err.textContent = 'カード名称を入力してください。'; return; }
+      if (!validPlace({ lat: parseFloat(vals.dLat), lng: parseFloat(vals.dLng) })) { err.textContent = '配布場所の緯度・経度を数値で入力してください。'; return; }
+      const hasL = vals.lLat !== '' || vals.lLng !== '';
+      if (hasL && !validPlace({ lat: parseFloat(vals.lLat), lng: parseFloat(vals.lLng) })) { err.textContent = '蓋の緯度・経度は、両方を数値で入力するか、両方を空欄にしてください。'; return; }
+    } else if (!confirm('このカードをCSVから削除します。よろしいですか？')) return;
+    const gh = getGh();
+    if (!gh) { err.textContent = '先に左上の ⚙ でGitHub連携を設定してください。'; return; }
+    const btns = ['#ed-save', '#ed-del', '#ed-cancel'].map($);
+    btns.forEach((b) => { b.disabled = true; });
+    try {
+      const { csv, sha } = await ghGetCsv(gh);
+      ensureColumns(csv);
+      const idx = colIdx(csv.head);
+      if (isNew && csv.rows.some((r) => String(r[idx.id] || '').trim() === id)) throw new Error('同じIDのカードが既にあります');
+      applyValues(csv, id, vals, remove);
+      await ghPut(gh, CSV_PATH, await blobToB64(new Blob([toCsv(csv)])), sha, (remove ? 'カード削除: ' : isNew ? 'カード追加: ' : 'カード更新: ') + id);
+      state.csv = csv;
+      state.cards = buildCards(csv).cards;
+      closeSheet();
+      renderPins();
+      $('#editor').close();
+      if (!remove) {
+        const c = state.cards.find((x) => x.id === id);
+        if (c) openSheet(id, state.mode === 'lid' && c.lid ? 'lid' : 'dist', true);
+      }
+      toast('保存しました。この画面にはすぐ反映され、公開サイトには1〜2分で反映されます。');
+    } catch (e) {
+      err.textContent = '保存に失敗しました: ' + e.message;
+    } finally {
+      btns.forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  /* ---------- 作成者モード: GitHub設定 ---------- */
+  function openSettings() {
+    let g = {};
+    try { g = JSON.parse(localStorage.getItem(GH_KEY) || '{}') || {}; } catch (e) { g = {}; }
+    $('#gh-owner').value = g.owner || '';
+    $('#gh-repo').value = g.repo || '';
+    $('#gh-branch').value = g.branch || '';
+    $('#gh-token').value = '';
+    $('#gh-token').placeholder = g.token ? '（保存済み。変更するときだけ入力）' : 'github_pat_...';
+    $('#gh-msg').textContent = '';
+    $('#settings').showModal();
+  }
+  async function saveSettings() {
+    const msg = $('#gh-msg');
+    let old = {};
+    try { old = JSON.parse(localStorage.getItem(GH_KEY) || '{}') || {}; } catch (e) { old = {}; }
+    const g = { owner: $('#gh-owner').value.trim(), repo: $('#gh-repo').value.trim(), branch: $('#gh-branch').value.trim() || 'main',
+      token: $('#gh-token').value.trim() || old.token || '' };
+    if (!g.owner || !g.repo || !g.token) { msg.textContent = 'ユーザー名・リポジトリ名・トークンを入力してください。'; return; }
+    msg.textContent = '接続を確認中…';
+    try {
+      const f = await ghGet(g, 'data');
+      if (!f) throw new Error('リポジトリ内に data フォルダが見つかりません（ブランチ名・リポジトリ名を確認）');
+      localStorage.setItem(GH_KEY, JSON.stringify(g));
+      msg.textContent = '接続できました。再読み込みします…';
+      setTimeout(() => location.reload(), 800);
+    } catch (e) {
+      msg.textContent = '接続できませんでした: ' + e.message;
+    }
+  }
+
+  /* ---------- 初期化 ---------- */
   async function init() {
     if (typeof maplibregl === 'undefined') {
       toast('地図ライブラリを読み込めませんでした。通信状況を確認して再読み込みしてください。', true);
       return;
     }
+    try {
+      const q = new URLSearchParams(location.search).get('admin');
+      if (q === '1') localStorage.setItem(ADMIN_KEY, '1');
+      if (q === '0') localStorage.removeItem(ADMIN_KEY);
+      state.admin = localStorage.getItem(ADMIN_KEY) === '1';
+    } catch (e) { state.admin = false; }
     loadCollected();
     map = new maplibregl.Map({
-      container: 'map',
-      style: STYLE_URL,
+      container: 'map', style: STYLE_URL,
       center: [137.5, 36.5], zoom: 4.5, minZoom: 3, maxZoom: 18, attributionControl: false
     });
     map.touchZoomRotate.disableRotation();
@@ -367,33 +627,59 @@
       saveCollected();
       refreshPins();
     });
-    $('#d-photo').addEventListener('change', async (e) => {
-      const f = e.target.files && e.target.files[0];
-      e.target.value = '';
-      if (!f || !state.selected) return;
-      const id = state.selected.id;
-      try {
-        const blob = await shrink(f);
-        await photoPut(String(id), blob);
-        setPhoto(id, blob);
-        toast('写真をこの端末に保存しました。');
-        if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
-      } catch (err) {
-        toast('写真を保存できませんでした。プライベートブラウズでないか確認してください。');
-      }
-    });
-    $('#d-export').addEventListener('click', () => {
-      const id = state.selected && String(state.selected.id);
-      if (!id || !state.photos[id]) return;
-      const a = document.createElement('a');
-      a.href = state.photos[id];
-      a.download = safeName(id) + '.jpg';
-      a.click();
-    });
     window.addEventListener('resize', setSheetHeight);
 
+    if (state.admin) {
+      document.body.classList.add('admin');
+      $('#gh-btn').hidden = false;
+      $('#add-btn').hidden = false;
+      $('#gh-btn').addEventListener('click', openSettings);
+      $('#add-btn').addEventListener('click', () => openEditor(null));
+      $('#d-edit').addEventListener('click', () => { if (state.selected) openEditor(state.selected.id); });
+      $('#gh-save').addEventListener('click', saveSettings);
+      $('#gh-close').addEventListener('click', () => $('#settings').close());
+      $('#gh-clear').addEventListener('click', () => { localStorage.removeItem(GH_KEY); $('#gh-msg').textContent = '設定を消しました。'; });
+      $('#ed-save').addEventListener('click', () => saveCard(false));
+      $('#ed-del').addEventListener('click', () => saveCard(true));
+      $('#ed-cancel').addEventListener('click', () => $('#editor').close());
+      $('#d-photo').addEventListener('change', async (e) => {
+        const f = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!f || !state.selected) return;
+        const id = state.selected.id, gh = getGh();
+        try {
+          const blob = await shrink(f);
+          if (gh) {
+            toast('GitHubに写真をアップロード中…', true);
+            const path = 'images/cards/' + safeName(id) + '.jpg';
+            const ex = await ghGet(gh, path);
+            await ghPut(gh, path, await blobToB64(blob), ex && ex.sha, '写真: ' + id);
+            setPhoto(id, blob, false);
+            toast('写真をアップロードしました。公開サイトには1〜2分で反映されます。');
+          } else {
+            await photoPut(String(id), blob);
+            setPhoto(id, blob, true);
+            toast('GitHub未設定のため、写真はこの端末にだけ保存しました。');
+            if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+          }
+        } catch (err) {
+          toast('写真を保存できませんでした: ' + err.message);
+        }
+      });
+      $('#d-export').addEventListener('click', () => {
+        const id = state.selected && String(state.selected.id);
+        if (!id || !state.photos[id]) return;
+        const a = document.createElement('a');
+        a.href = state.photos[id];
+        a.download = safeName(id) + '.jpg';
+        a.click();
+      });
+      if (!getGh()) toast('作成者モード: 左上の ⚙ でGitHub連携を設定すると、サイト上で編集・保存できます。');
+    }
+
     try {
-      const r = await loadCards();
+      state.csv = await loadCsv();
+      const r = buildCards(state.csv);
       state.cards = r.cards;
       if (r.bad.length) toast('CSVの ' + r.bad.slice(0, 5).join('・') + ' 行目を読み込めませんでした（ID重複・必須項目・座標を確認してください）。', true);
     } catch (e) {
@@ -401,10 +687,10 @@
         ? 'データを読み込めません。ファイルを直接開かず、README記載の方法でサーバー経由で開いてください。'
         : 'カードデータを読み込めませんでした（' + e.message + '）。', true);
     }
-    try { const all = await photoAll(); Object.keys(all).forEach((id) => setPhoto(id, all[id])); } catch (e) { /* 写真保存が使えない環境 */ }
-    state.cards.forEach((c) => { addPin('dist', c); addPin('lid', c); });
-    setMode('dist');
-    refreshPins();
+    if (state.admin) {
+      try { const all = await photoAll(); Object.keys(all).forEach((id) => setPhoto(id, all[id], true)); } catch (e) { /* 端末内保存が使えない環境 */ }
+    }
+    renderPins();
 
     const pts = state.pins.dist.map((p) => p.marker.getLngLat());
     if (pts.length) {

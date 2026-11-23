@@ -271,12 +271,25 @@
   }
 
   /* ---------- ピン ---------- */
-  const REGION_COLORS = {北海道:'#28a745',東北:'#9acd32',関東:'#55c7e8',北陸:'#2468d8',中国:'#e53935',四国:'#8e44ad',近畿:'#f39c12',九州:'#ec78b5',沖縄:'#ec78b5',中部:'#f1c40f'};\n  const PREF_REGION = {\n    北海道:'北海道',青森県:'東北',岩手県:'東北',宮城県:'東北',秋田県:'東北',山形県:'東北',福島県:'東北',\n    茨城県:'関東',栃木県:'関東',群馬県:'関東',埼玉県:'関東',千葉県:'関東',東京都:'関東',神奈川県:'関東',\n    新潟県:'北陸',富山県:'北陸',石川県:'北陸',福井県:'北陸',\n    山梨県:'中部',長野県:'中部',岐阜県:'中部',静岡県:'中部',愛知県:'中部',\n    三重県:'近畿',滋賀県:'近畿',京都府:'近畿',大阪府:'近畿',兵庫県:'近畿',奈良県:'近畿',和歌山県:'近畿',\n    鳥取県:'中国',島根県:'中国',岡山県:'中国',広島県:'中国',山口県:'中国',\n    徳島県:'四国',香川県:'四国',愛媛県:'四国',高知県:'四国',\n    福岡県:'九州',佐賀県:'九州',長崎県:'九州',熊本県:'九州',大分県:'九州',宮崎県:'九州',鹿児島県:'九州',沖縄県:'沖縄'\n  };\n  function addPin(kind, card) {
+  const REGION_COLORS = {北海道:'#28a745',東北:'#9acd32',関東:'#55c7e8',北陸:'#2468d8',中国:'#e53935',四国:'#8e44ad',近畿:'#f39c12',九州:'#ec78b5',沖縄:'#ec78b5',中部:'#f1c40f'};
+  const PREF_REGION = {
+    北海道:'北海道',青森県:'東北',岩手県:'東北',宮城県:'東北',秋田県:'東北',山形県:'東北',福島県:'東北',
+    茨城県:'関東',栃木県:'関東',群馬県:'関東',埼玉県:'関東',千葉県:'関東',東京都:'関東',神奈川県:'関東',
+    新潟県:'北陸',富山県:'北陸',石川県:'北陸',福井県:'北陸',
+    山梨県:'中部',長野県:'中部',岐阜県:'中部',静岡県:'中部',愛知県:'中部',
+    三重県:'近畿',滋賀県:'近畿',京都府:'近畿',大阪府:'近畿',兵庫県:'近畿',奈良県:'近畿',和歌山県:'近畿',
+    鳥取県:'中国',島根県:'中国',岡山県:'中国',広島県:'中国',山口県:'中国',
+    徳島県:'四国',香川県:'四国',愛媛県:'四国',高知県:'四国',
+    福岡県:'九州',佐賀県:'九州',長崎県:'九州',熊本県:'九州',大分県:'九州',宮崎県:'九州',鹿児島県:'九州',沖縄県:'沖縄'
+  };
+  function addPin(kind, card) {
     const place = card[FIELD[kind]];
     if (!validPlace(place)) return;
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'pin pin-' + kind;\n    const region = PREF_REGION[card.prefecture] || '中部';\n    el.style.setProperty('--region', REGION_COLORS[region] || REGION_COLORS['中部']);
+    el.className = 'pin pin-' + kind;
+    const region = PREF_REGION[card.prefecture] || '中部';
+    el.style.setProperty('--region', REGION_COLORS[region] || REGION_COLORS['中部']);
     el.setAttribute('aria-label', card.name + '（' + KIND[kind] + '）');
     let img = null;
     if (kind === 'dist') {
@@ -669,7 +682,10 @@
     if (state.admin) {
       document.body.classList.add('admin');
       $('#gh-btn').hidden = false;
-      $('#add-btn').hidden = false;\n      $('#csv-btn').hidden = false;\n      $('#csv-btn').addEventListener('click', () => $('#csv-file').click());\n      $('#csv-file').addEventListener('change', importCsv);
+      $('#add-btn').hidden = false;
+      $('#csv-btn').hidden = false;
+      $('#csv-btn').addEventListener('click', () => $('#csv-file').click());
+      $('#csv-file').addEventListener('change', importCsv);
       $('#gh-btn').addEventListener('click', openSettings);
       $('#add-btn').addEventListener('click', () => openEditor(null));
       $('#d-edit').addEventListener('click', () => { if (state.selected) openEditor(state.selected.id); });

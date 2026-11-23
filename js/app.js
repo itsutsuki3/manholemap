@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const STORAGE_KEY = 'manholeMap.collected.v1';
-  const CSV_PATHS = ["data/cards.csv","data/cards-02.csv","data/cards-03.csv","data/cards-04.csv","data/cards-05.csv","data/cards-06.csv","data/cards-07.csv","data/cards-08.csv","data/cards-09.csv","data/cards-10.csv","data/cards-11.csv","data/cards-12.csv","data/cards-13.csv","data/cards-14.csv"];
+  const CSV_INDEX_PATH = 'data/cards-index.json';
   // OpenStreetMapデータのベクタ地図（OpenFreeMap、APIキー不要）。bright以外に liberty / positron も指定できる
   const STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
   const KIND = { dist: 'カード配布場所', lid: 'マンホール蓋の設置場所' };
@@ -9,7 +9,8 @@
   const STATUS = { verified: '確認済み', unverified: '未確認', sample: '架空（サンプル）' };
   const $ = (s) => document.querySelector(s);
   const state = { mode: 'dist', cards: [], csv: null, collected: new Set(), pins: { dist: [], lid: [] }, selected: null,
-    me: null, watching: false, location: null };
+    me: null, watching: false, location: null, dataIndex: null, indexPromise: null,
+    loadedFiles: new Set(), loadingFiles: new Map() };
   let map, toastTimer, tileErrorShown = false;
 
   function toast(msg, sticky) {
@@ -106,13 +107,76 @@
     return { cards, bad };
   }
 
-  async function loadCsv() {
-    const parts = await Promise.all(CSV_PATHS.map(async (path) => {
-      const res = await fetch(path, { cache: 'no-cache' });
-      if (!res.ok) throw new Error(path + ': HTTP ' + res.status);
-      return parseToCsv(decodeBytes(new Uint8Array(await res.arrayBuffer())));
-    }));
-    return { head: parts[0].head, rows: parts.flatMap((part) => part.rows) };
+  async function loadDataIndex() {
+    if (state.dataIndex) return state.dataIndex;
+    if (!state.indexPromise) {
+      state.indexPromise = (async () => {
+        const res = await fetch(CSV_INDEX_PATH, { cache: 'no-cache' });
+        if (!res.ok) throw new Error(CSV_INDEX_PATH + ': HTTP ' + res.status);
+        return res.json();
+      })();
+    }
+    try {
+      state.dataIndex = await state.indexPromise;
+      return state.dataIndex;
+    } catch (e) {
+      state.indexPromise = null;
+      throw e;
+    }
+  }
+
+  async function loadCardFile(entry) {
+    if (state.loadedFiles.has(entry.path)) return;
+    if (state.loadingFiles.has(entry.path)) return state.loadingFiles.get(entry.path);
+    const task = (async () => {
+      const res = await fetch(entry.path, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(entry.path + ': HTTP ' + res.status);
+      const part = parseToCsv(decodeBytes(new Uint8Array(await res.arrayBuffer())));
+      if (!state.csv) state.csv = { head: part.head, rows: [] };
+      state.csv.rows.push(...part.rows);
+      const result = buildCards(state.csv);
+      state.cards = result.cards;
+      if (result.bad.length) toast('一部のカードデータを読み込めませんでした。', true);
+      state.loadedFiles.add(entry.path);
+    })();
+    state.loadingFiles.set(entry.path, task);
+    try {
+      await task;
+    } finally {
+      state.loadingFiles.delete(entry.path);
+    }
+  }
+
+  const fileDistance = (entry, center) => {
+    const [west, south, east, north] = entry.bounds;
+    const lng = Math.max(west, Math.min(east, center.lng));
+    const lat = Math.max(south, Math.min(north, center.lat));
+    const dx = (lng - center.lng) * Math.cos(center.lat * Math.PI / 180);
+    return dx * dx + (lat - center.lat) * (lat - center.lat);
+  };
+
+  async function loadCardsForView() {
+    try {
+      const index = await loadDataIndex();
+      const bounds = map.getBounds();
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      const candidates = index.files.filter((entry) => {
+        const [west, south, east, north] = entry.bounds;
+        return west <= bounds.getEast() && east >= bounds.getWest() &&
+          south <= bounds.getNorth() && north >= bounds.getSouth();
+      });
+      let selected = candidates.sort((a, b) => fileDistance(a, center) - fileDistance(b, center));
+      if (zoom < 5) selected = index.files.slice().sort((a, b) => fileDistance(a, center) - fileDistance(b, center)).slice(0, 1);
+      else if (zoom < 7) selected = selected.slice(0, 3);
+      else if (zoom < 9) selected = selected.slice(0, 8);
+      if (!selected.length) selected = index.files.slice().sort((a, b) => fileDistance(a, center) - fileDistance(b, center)).slice(0, 1);
+      await Promise.all(selected.map(loadCardFile));
+      renderPins();
+    } catch (e) {
+      toast('選択した地域のデータを読み込めませんでした（' + e.message + '）。', true);
+      renderPins();
+    }
   }
 
   function loadImg(img, card, done) {
@@ -346,7 +410,7 @@
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.on('click', closeSheet);
-    map.on('moveend', renderPins);
+    map.on('moveend', loadCardsForView);
     map.on('error', () => {
       if (tileErrorShown) return;
       tileErrorShown = true;
@@ -363,17 +427,7 @@
     });
     window.addEventListener('resize', setSheetHeight);
 
-    try {
-      state.csv = await loadCsv();
-      const r = buildCards(state.csv);
-      state.cards = r.cards;
-      if (r.bad.length) toast('CSVの ' + r.bad.slice(0, 5).join('・') + ' 行目を読み込めませんでした（ID重複・必須項目・座標を確認してください）。', true);
-    } catch (e) {
-      toast(location.protocol === 'file:'
-        ? 'データを読み込めません。ファイルを直接開かず、README記載の方法でサーバー経由で開いてください。'
-        : 'カードデータを読み込めませんでした（' + e.message + '）。', true);
-    }
-    renderPins();
+    await loadCardsForView();
 
 
   }

@@ -176,11 +176,51 @@
     state.pins.dist.forEach((p) => p.marker.addTo(map));
   }
 
+  function visibleCards() {
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+    let cards = state.cards.filter((card) => {
+      const place = card.distribution;
+      return validPlace(place) && bounds.contains([place.lng, place.lat]);
+    });
+    const limit = zoom < 5 ? 40 : zoom < 7 ? 100 : zoom < 9 ? 250 : zoom < 11 ? 500 : 800;
+    if (cards.length > limit) {
+      const cellSize = zoom < 5 ? 0.8 : zoom < 7 ? 0.3 : zoom < 9 ? 0.1 : zoom < 11 ? 0.04 : 0.015;
+      const cells = new Map();
+      cards.forEach((card) => {
+        const place = card.distribution;
+        const key = Math.floor(place.lat / cellSize) + ':' + Math.floor(place.lng / cellSize);
+        if (!cells.has(key)) cells.set(key, card);
+      });
+      cards = [...cells.values()];
+      if (cards.length > limit) {
+        const step = cards.length / limit;
+        cards = Array.from({ length: limit }, (_, n) => cards[Math.floor(n * step)]);
+      }
+    }
+    if (state.selected && !cards.some((card) => card.id === state.selected.id)) {
+      const selected = state.cards.find((card) => card.id === state.selected.id);
+      if (selected && bounds.contains([selected.distribution.lng, selected.distribution.lat])) cards.push(selected);
+    }
+    return cards;
+  }
+
   function renderPins() {
-    ['dist', 'lid'].forEach((k) => state.pins[k].forEach((p) => p.marker.remove()));
-    state.pins = { dist: [], lid: [] };
-    state.cards.forEach((c) => { addPin('dist', c); addPin('lid', c); });
-    setMode(state.mode);
+    const cards = visibleCards();
+    const wanted = new Set(cards.map((card) => String(card.id)));
+    state.pins.dist = state.pins.dist.filter((pin) => {
+      if (wanted.has(String(pin.id))) return true;
+      pin.marker.remove();
+      return false;
+    });
+    const existing = new Set(state.pins.dist.map((pin) => String(pin.id)));
+    cards.forEach((card) => {
+      if (existing.has(String(card.id))) return;
+      addPin('dist', card);
+      state.pins.dist[state.pins.dist.length - 1].marker.addTo(map);
+    });
+    state.pins.lid.forEach((pin) => pin.marker.remove());
+    state.pins.lid = [];
     prioritizeNearbyPins();
     refreshPins();
   }
@@ -306,6 +346,7 @@
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.on('click', closeSheet);
+    map.on('moveend', renderPins);
     map.on('error', () => {
       if (tileErrorShown) return;
       tileErrorShown = true;

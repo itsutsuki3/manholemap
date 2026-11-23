@@ -11,36 +11,15 @@
 <body>
 <div id="map" aria-label="地図"></div>
 
-<div id="mode" role="group" aria-label="表示する場所の切り替え">
-  <button type="button" data-mode="dist" aria-pressed="true">カード配布場所</button>
-  <button type="button" data-mode="lid" aria-pressed="false">蓋の設置場所</button>
-</div>
-
 <button id="locate" type="button" aria-label="現在地を表示">
   <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>
 </button>
-
-<div id="tools">
-  <button id="gh-btn" type="button" aria-label="GitHub連携の設定" hidden>
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-  </button>
-  <button id="csv-btn" type="button" aria-label="CSVを一括読み込み" hidden>CSV</button>
-  <input id="csv-file" type="file" accept=".csv,text/csv" hidden>
-  <button id="add-btn" type="button" aria-label="カードを追加" hidden>
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
-  </button>
-  <button id="backup" type="button" aria-label="端末に保存した写真をZIPでダウンロード" hidden>
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <span id="backup-n"></span>
-  </button>
-</div>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
 <aside id="sheet" aria-label="詳細" hidden>
   <button id="close" type="button" aria-label="閉じる">✕</button>
-  <p id="sample-note" class="note" hidden>動作確認用の架空データです。実在の場所ではありません。</p>
-  <div class="head">
+<div class="head">
     <img id="d-img" alt="" width="84" height="118">
     <div>
       <p id="d-kind" class="kind"></p>
@@ -54,35 +33,10 @@
   <div class="actions">
     <a id="d-gmaps" class="btn primary" target="_blank" rel="noopener">Google Mapsで経路</a>
     <a id="d-amaps" class="btn" target="_blank" rel="noopener">Apple Maps</a>
-    <button id="d-swap" class="btn" type="button"></button>
   </div>
-  <div class="actions photo-row">
-    <label class="btn" for="d-photo">📷 <span id="photo-label">写真を撮影</span></label>
-    <input id="d-photo" type="file" accept="image/*" capture="environment" hidden>
-    <button id="d-export" class="btn" type="button" hidden>写真を書き出す</button>
-    <button id="d-edit" class="btn" type="button">カード情報を編集</button>
-  </div>
-  <p id="d-src" class="small"></p>
+<p id="d-src" class="small"></p>
   <p id="d-status" class="small"></p>
 </aside>
-
-<dialog id="settings">
-  <h3>GitHub連携（作成者用）</h3>
-  <p class="small">入力した内容はこの端末のブラウザにだけ保存され、サイトには公開されません。トークンは、このリポジトリだけに限定し、Contentsの「Read and write」だけを許可したFine-grained tokenを使ってください。</p>
-  <label class="f"><span>GitHubのユーザー名（またはOrganization）</span><input id="gh-owner" autocomplete="off" autocapitalize="off"></label>
-  <label class="f"><span>リポジトリ名</span><input id="gh-repo" autocomplete="off" autocapitalize="off"></label>
-  <label class="f"><span>ブランチ（空欄ならmain）</span><input id="gh-branch" autocomplete="off" autocapitalize="off"></label>
-  <label class="f"><span>アクセストークン</span><input id="gh-token" type="password" autocomplete="off"></label>
-  <p id="gh-msg" class="err"></p>
-  <div class="actions"><button id="gh-save" class="btn primary" type="button">保存して接続テスト</button><button id="gh-clear" class="btn" type="button">設定を消す</button><button id="gh-close" class="btn" type="button">閉じる</button></div>
-</dialog>
-
-<dialog id="editor">
-  <h3 id="ed-title"></h3>
-  <div id="ed-body"></div>
-  <p id="ed-err" class="err"></p>
-  <div class="actions"><button id="ed-save" class="btn primary" type="button">保存</button><button id="ed-cancel" class="btn" type="button">キャンセル</button><button id="ed-del" class="btn danger" type="button" hidden>削除</button></div>
-</dialog>
 
 <noscript><p style="padding:16px">このサイトの利用にはJavaScriptが必要です。</p></noscript>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>

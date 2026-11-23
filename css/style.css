@@ -16,7 +16,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #1a73
 .pin{position:absolute;padding:0;border:0;cursor:pointer;background:#fff}
 .pin-dist{width:56px;height:56px;border-radius:50%;border:3px solid var(--region,var(--dist));box-shadow:0 2px 6px rgba(0,0,0,.4);--c:var(--region,var(--dist))}
 .pin-dist::after{content:"";position:absolute;left:50%;bottom:-12px;transform:translateX(-50%);border:7px solid transparent;border-top:9px solid var(--c);border-bottom:0}
-.pin-dist img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
+.pin-dist img{position:absolute;left:50%;top:50%;z-index:1;transform:translate(-50%,-50%);width:64px;height:64px;object-fit:cover;border-radius:50%;display:block}
 .pin-dist.noimg{background:var(--dist)}
 .pin.done{filter:grayscale(1);opacity:.55}
 .pin-dist.done{--c:#888;border-color:#888}
@@ -43,6 +43,8 @@ h2{margin:0 0 4px;font-size:18px;line-height:1.35}
 .photo-row{margin-top:8px}
 .small{margin:10px 0 0;font-size:12px;color:var(--sub);word-break:break-all}
 .small a{color:inherit}
+.source-link{margin:5px 0 0;font-size:14px;font-weight:600;line-height:1.4;color:var(--sub)}
+.source-link a{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
 
 @media (min-width:760px){
   #sheet{left:16px;right:auto;top:16px;bottom:16px;width:380px;max-height:none;border-radius:16px;padding-bottom:16px}

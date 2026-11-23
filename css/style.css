@@ -17,7 +17,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #1a73
 .pin-dist{width:56px;height:56px;border-radius:50%;border:3px solid var(--region,var(--dist));box-shadow:0 2px 6px rgba(0,0,0,.4);--c:var(--region,var(--dist))}
 .pin-dist::before{content:"";position:absolute;inset:0;z-index:2;border:3px solid var(--c);border-radius:50%;pointer-events:none}
 .pin-dist::after{content:"";position:absolute;left:50%;bottom:-12px;transform:translateX(-50%);border:7px solid transparent;border-top:9px solid var(--c);border-bottom:0}
-.pin-dist img{position:absolute;left:50%;top:50%;z-index:1;transform:translate(-50%,-50%);width:64px;height:64px;object-fit:cover;border-radius:50%;clip-path:circle(25px at 50% 50%);display:block}
+.pin-dist img{position:absolute;left:50%;top:50%;z-index:1;transform:translate(-50%,-50%);width:64px;height:64px;object-fit:cover;border-radius:50%;clip-path:circle(24.5px at 50% 50%);display:block}
 .pin-dist.noimg{background:var(--dist)}
 .pin.done{filter:grayscale(1);opacity:.55}
 .pin-dist.done{--c:#888;border-color:#888}

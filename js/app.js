@@ -119,6 +119,7 @@
     const url = safeUrl(card.imageUrl);
     if (!url) { img.style.display = 'none'; if (done) done(true); return; }
     img.style.display = '';
+    img.loading = 'lazy';
     img.onload = () => { if (done) done(false); };
     img.onerror = () => { img.style.display = 'none'; if (done) done(true); };
     img.src = url;
@@ -283,7 +284,7 @@
     loadCollected();
     map = new maplibregl.Map({
       container: 'map', style: STYLE_URL,
-      center: [137.5, 36.5], zoom: 4.5, minZoom: 3, maxZoom: 18, attributionControl: false
+      center: [139.7528, 35.6852], zoom: 13.5, minZoom: 3, maxZoom: 18, attributionControl: false
     });
     map.touchZoomRotate.disableRotation();
     map.dragRotate.disable();
@@ -319,11 +320,7 @@
     }
     renderPins();
 
-    const pts = state.pins.dist.map((p) => p.marker.getLngLat());
-    if (pts.length) {
-      const b = pts.reduce((acc, ll) => acc.extend(ll), new maplibregl.LngLatBounds(pts[0], pts[0]));
-      map.fitBounds(b, { padding: 80, maxZoom: 13, duration: 0 });
-    }
+
   }
   init();
 })();

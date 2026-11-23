@@ -210,7 +210,7 @@
     $('#d-gmaps').href = 'https://www.google.com/maps/dir/?api=1&destination=' + dest;
     $('#d-amaps').href = 'https://maps.apple.com/?daddr=' + dest;
     const src = $('#d-src');
-    src.textContent = '出典：';
+    src.textContent = '配布状況など：';
     const url = safeUrl(card.sourceUrl);
     if (url) {
       const a = document.createElement('a');

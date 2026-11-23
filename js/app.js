@@ -247,9 +247,9 @@
       const place = card.distribution;
       return validPlace(place) && bounds.contains([place.lng, place.lat]);
     });
-    const limit = zoom < 5 ? 40 : zoom < 7 ? 100 : zoom < 9 ? 250 : zoom < 11 ? 500 : 800;
+    const limit = zoom < 5 ? 12 : zoom < 7 ? 30 : zoom < 9 ? 80 : zoom < 11 ? 180 : 500;
     if (cards.length > limit) {
-      const cellSize = zoom < 5 ? 0.8 : zoom < 7 ? 0.3 : zoom < 9 ? 0.1 : zoom < 11 ? 0.04 : 0.015;
+      const cellSize = zoom < 5 ? 1.5 : zoom < 7 ? 0.6 : zoom < 9 ? 0.2 : zoom < 11 ? 0.06 : 0.015;
       const cells = new Map();
       cards.forEach((card) => {
         const place = card.distribution;

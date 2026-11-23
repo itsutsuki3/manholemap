@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const STORAGE_KEY = 'manholeMap.collected.v1';
-  const CSV_PATH = 'data/cards.csv';
+  const CSV_PATHS = ["data/cards.csv","data/cards-02.csv","data/cards-03.csv","data/cards-04.csv","data/cards-05.csv","data/cards-06.csv","data/cards-07.csv","data/cards-08.csv","data/cards-09.csv","data/cards-10.csv","data/cards-11.csv","data/cards-12.csv","data/cards-13.csv","data/cards-14.csv"];
   // OpenStreetMapデータのベクタ地図（OpenFreeMap、APIキー不要）。bright以外に liberty / positron も指定できる
   const STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
   const KIND = { dist: 'カード配布場所', lid: 'マンホール蓋の設置場所' };
@@ -107,9 +107,12 @@
   }
 
   async function loadCsv() {
-    const res = await fetch(CSV_PATH, { cache: 'no-cache' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return parseToCsv(decodeBytes(new Uint8Array(await res.arrayBuffer())));
+    const parts = await Promise.all(CSV_PATHS.map(async (path) => {
+      const res = await fetch(path, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(path + ': HTTP ' + res.status);
+      return parseToCsv(decodeBytes(new Uint8Array(await res.arrayBuffer())));
+    }));
+    return { head: parts[0].head, rows: parts.flatMap((part) => part.rows) };
   }
 
   function loadImg(img, card, done) {

@@ -9,7 +9,7 @@
   const STATUS = { verified: '確認済み', unverified: '未確認', sample: '架空（サンプル）' };
   const $ = (s) => document.querySelector(s);
   const state = { mode: 'dist', cards: [], csv: null, collected: new Set(), pins: { dist: [], lid: [] }, selected: null,
-    me: null, watching: false };
+    me: null, watching: false, location: null };
   let map, toastTimer, tileErrorShown = false;
 
   function toast(msg, sticky) {
@@ -120,6 +120,7 @@
     if (!url) { img.style.display = 'none'; if (done) done(true); return; }
     img.style.display = '';
     img.loading = 'lazy';
+    img.fetchPriority = 'low';
     img.onload = () => { if (done) done(false); };
     img.onerror = () => { img.style.display = 'none'; if (done) done(true); };
     img.src = url;
@@ -180,6 +181,7 @@
     state.pins = { dist: [], lid: [] };
     state.cards.forEach((c) => { addPin('dist', c); addPin('lid', c); });
     setMode(state.mode);
+    prioritizeNearbyPins();
     refreshPins();
   }
 
@@ -207,11 +209,6 @@
     const dest = place.lat + ',' + place.lng;
     $('#d-gmaps').href = 'https://www.google.com/maps/dir/?api=1&destination=' + dest;
     $('#d-amaps').href = 'https://maps.apple.com/?daddr=' + dest;
-    $('#sample-note').hidden = !card.sample;
-    const hasPhoto = !!state.photos[String(id)];
-    $('#photo-label').textContent = hasPhoto ? '写真を撮り直す' : '写真を撮影';
-    $('#d-export').hidden = !hasPhoto;
-
     const src = $('#d-src');
     src.textContent = '出典：';
     const url = safeUrl(card.sourceUrl);
@@ -243,9 +240,26 @@
     refreshPins();
   }
 
+  function prioritizeNearbyPins() {
+    if (!state.location) return;
+    const origin = state.location;
+    state.pins.dist.forEach((p) => {
+      if (!p.img || p.img.style.display === 'none') return;
+      const ll = p.marker.getLngLat();
+      const dy = (ll.lat - origin.lat) * 111;
+      const dx = (ll.lng - origin.lng) * 111 * Math.cos(origin.lat * Math.PI / 180);
+      if (Math.hypot(dx, dy) <= 12) {
+        p.img.loading = 'eager';
+        p.img.fetchPriority = 'high';
+      }
+    });
+  }
+
   /* ---------- 現在地 ---------- */
   function showMe(pos) {
     const ll = [pos.coords.longitude, pos.coords.latitude];
+    state.location = { lng: ll[0], lat: ll[1] };
+    prioritizeNearbyPins();
     if (!state.me) {
       const el = document.createElement('div');
       el.className = 'me';

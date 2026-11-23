@@ -271,12 +271,12 @@
   }
 
   /* ---------- ピン ---------- */
-  function addPin(kind, card) {
+  const REGION_COLORS = {北海道:'#28a745',東北:'#9acd32',関東:'#55c7e8',北陸:'#2468d8',中国:'#e53935',四国:'#8e44ad',近畿:'#f39c12',九州:'#ec78b5',沖縄:'#ec78b5',中部:'#f1c40f'};\n  const PREF_REGION = {\n    北海道:'北海道',青森県:'東北',岩手県:'東北',宮城県:'東北',秋田県:'東北',山形県:'東北',福島県:'東北',\n    茨城県:'関東',栃木県:'関東',群馬県:'関東',埼玉県:'関東',千葉県:'関東',東京都:'関東',神奈川県:'関東',\n    新潟県:'北陸',富山県:'北陸',石川県:'北陸',福井県:'北陸',\n    山梨県:'中部',長野県:'中部',岐阜県:'中部',静岡県:'中部',愛知県:'中部',\n    三重県:'近畿',滋賀県:'近畿',京都府:'近畿',大阪府:'近畿',兵庫県:'近畿',奈良県:'近畿',和歌山県:'近畿',\n    鳥取県:'中国',島根県:'中国',岡山県:'中国',広島県:'中国',山口県:'中国',\n    徳島県:'四国',香川県:'四国',愛媛県:'四国',高知県:'四国',\n    福岡県:'九州',佐賀県:'九州',長崎県:'九州',熊本県:'九州',大分県:'九州',宮崎県:'九州',鹿児島県:'九州',沖縄県:'沖縄'\n  };\n  function addPin(kind, card) {
     const place = card[FIELD[kind]];
     if (!validPlace(place)) return;
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'pin pin-' + kind;
+    el.className = 'pin pin-' + kind;\n    const region = PREF_REGION[card.prefecture] || '中部';\n    el.style.setProperty('--region', REGION_COLORS[region] || REGION_COLORS['中部']);
     el.setAttribute('aria-label', card.name + '（' + KIND[kind] + '）');
     let img = null;
     if (kind === 'dist') {
@@ -563,6 +563,33 @@
     }
   }
 
+
+  async function importCsv(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const gh = getGh();
+    if (!gh) return toast('先に左上の ⚙ でGitHub連携を設定してください。');
+    try {
+      const csv = parseToCsv(decodeBytes(new Uint8Array(await file.arrayBuffer())));
+      ensureColumns(csv);
+      const checked = buildCards(csv);
+      if (!checked.cards.length) throw new Error('有効なカードがありません。');
+      if (checked.bad.length) throw new Error('不正な行があります（' + checked.bad.slice(0, 10).join('、') + '行目）。ID重複・必須項目・配布座標を確認してください。');
+      if (!confirm('現在の cards.csv を置き換えます。\\n読み込み件数: ' + checked.cards.length + '件\\nこの操作はGitHubに保存されます。続行しますか？')) return;
+      toast('CSVをGitHubに保存中…', true);
+      const current = await ghGetCsv(gh);
+      await ghPut(gh, CSV_PATH, await blobToB64(new Blob([toCsv(csv)])), current.sha, 'CSV一括更新: ' + checked.cards.length + '件');
+      state.csv = csv;
+      state.cards = checked.cards;
+      renderPins();
+      closeSheet();
+      toast(checked.cards.length + '件のカードを一括読み込みしました。公開サイトには1〜2分で反映されます。');
+    } catch (err) {
+      toast('CSVの読み込みに失敗しました: ' + err.message, true);
+    }
+  }
+
   /* ---------- 作成者モード: GitHub設定 ---------- */
   function openSettings() {
     let g = {};
@@ -642,7 +669,7 @@
     if (state.admin) {
       document.body.classList.add('admin');
       $('#gh-btn').hidden = false;
-      $('#add-btn').hidden = false;
+      $('#add-btn').hidden = false;\n      $('#csv-btn').hidden = false;\n      $('#csv-btn').addEventListener('click', () => $('#csv-file').click());\n      $('#csv-file').addEventListener('change', importCsv);
       $('#gh-btn').addEventListener('click', openSettings);
       $('#add-btn').addEventListener('click', () => openEditor(null));
       $('#d-edit').addEventListener('click', () => { if (state.selected) openEditor(state.selected.id); });

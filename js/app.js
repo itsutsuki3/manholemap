@@ -335,8 +335,8 @@
     $('#d-kind').className = 'kind ' + kind;
     $('#d-name').textContent = card.name || '';
     $('#d-meta').textContent = [card.prefecture, card.city, card.series ? '第' + card.series + '弾' : ''].filter(Boolean).join(' ／ ');
-    $('#d-place').textContent = place.name || '';
-    $('#d-addr').textContent = place.address || '住所は未登録です';
+    $('#d-place').textContent = place.name || place.address || '';
+    $('#d-addr').textContent = place.name ? (place.address || '住所は未登録です') : '';
     $('#d-check').checked = state.collected.has(String(id));
     const dest = place.lat + ',' + place.lng;
     $('#d-gmaps').href = 'https://www.google.com/maps/dir/?api=1&destination=' + dest;
@@ -415,72 +415,72 @@
 
   /* ---------- 作成者モード: カードの追加・編集 ---------- */
   const FORM = [
-    { k: 'id', label: 'カードID *（半角英数字・ハイフン。後から変更不可）' }, { k: 'name', label: 'カード名称 *' },
-    { k: 'pref', label: '都道府県' }, { k: 'city', label: '市区町村' }, { k: 'series', label: '弾数' },
-    { h: 'カード配布場所' },
-    { k: 'dName', label: '名称' }, { k: 'dAddr', label: '住所' },
-    { k: 'dLat', label: '緯度 *（「緯度,経度」をまとめて貼り付け可）', num: 1 }, { k: 'dLng', label: '経度 *', num: 1 },
-    { gps: 'd' }, { k: 'dSt', label: '座標の確認状況', sel: 1 },
-    { h: 'マンホール蓋の設置場所（不明なら空欄）' },
-    { k: 'lName', label: '名称' }, { k: 'lAddr', label: '住所' },
-    { k: 'lLat', label: '緯度', num: 1 }, { k: 'lLng', label: '経度', num: 1 },
-    { gps: 'l', same: 1 }, { k: 'lSt', label: '座標の確認状況', sel: 1 },
-    { h: 'その他' },
-    { k: 'src', label: '出典URL' }, { k: 'checked', label: '情報確認日（例: 2026-11-22）' }
+    { k: 'id', label: 'カードID *（半角英数字・ハイフン。後から変更不可）' },
+    { k: 'name', label: 'カード名称 *' },
+    { k: 'dAddr', label: '配布場所・住所 *（一括入力。入力すると座標を自動で取得します）', geo: 1 },
+    { k: 'src', label: 'リンク（出典URL）' }
   ];
   const fEl = (k) => $('#ed-body [name="' + k + '"]');
   const fVal = (k) => fEl(k).value.trim();
   const fSet = (k, v) => { fEl(k).value = v; };
-  function mkBtn(text, fn) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'btn'; b.textContent = text; b.addEventListener('click', fn);
-    return b;
+
+  // 国土地理院の住所検索API（キー不要）
+  async function geocode(q) {
+    const res = await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(q));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json();
+    if (!Array.isArray(j) || !j.length || !j[0].geometry) return null;
+    return { lng: j[0].geometry.coordinates[0], lat: j[0].geometry.coordinates[1], title: j[0].properties && j[0].properties.title };
   }
-  function fillGps(p) {
-    if (!('geolocation' in navigator)) { $('#ed-err').textContent = 'この端末では現在地を取得できません。'; return; }
-    navigator.geolocation.getCurrentPosition((pos) => {
-      fSet(p + 'Lat', pos.coords.latitude.toFixed(6));
-      fSet(p + 'Lng', pos.coords.longitude.toFixed(6));
-    }, () => { $('#ed-err').textContent = '現在地を取得できませんでした。'; }, { enableHighAccuracy: true, timeout: 15000 });
+  async function geocodeInto(addr) {
+    const st = $('#ed-geo');
+    st.textContent = '住所から座標を検索中…';
+    try {
+      const r = await geocode(addr);
+      if (!r) { st.textContent = '住所が見つかりませんでした。都道府県から詳しく入力してください。'; return false; }
+      fSet('dLat', r.lat.toFixed(6));
+      fSet('dLng', r.lng.toFixed(6));
+      state.geoFor = addr;
+      st.textContent = '座標: ' + r.lat.toFixed(6) + ', ' + r.lng.toFixed(6) + (r.title ? '（' + r.title + ' 付近）' : '') + '。違う場所なら住所を詳しくしてください。';
+      return true;
+    } catch (e) {
+      st.textContent = '座標を取得できませんでした（' + e.message + '）。';
+      return false;
+    }
+  }
+  function mkField(f, value, readonly) {
+    const lab = document.createElement('label');
+    lab.className = 'f';
+    const sp = document.createElement('span');
+    sp.textContent = f.label;
+    lab.appendChild(sp);
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.autocomplete = 'off'; inp.name = f.k; inp.value = value || '';
+    if (readonly) inp.readOnly = true;
+    if (f.num) inp.inputMode = 'decimal';
+    lab.appendChild(inp);
+    return lab;
   }
   function buildForm(init) {
     const body = $('#ed-body');
     body.textContent = '';
     FORM.forEach((f) => {
-      if (f.h) { const h = document.createElement('h4'); h.textContent = f.h; body.appendChild(h); return; }
-      if (f.gps) {
-        const row = document.createElement('div');
-        row.className = 'actions';
-        row.appendChild(mkBtn('現在地を入力', () => fillGps(f.gps)));
-        if (f.same) row.appendChild(mkBtn('配布場所と同じ座標', () => { fSet('lLat', fVal('dLat')); fSet('lLng', fVal('dLng')); }));
-        body.appendChild(row);
-        return;
-      }
-      const lab = document.createElement('label');
-      lab.className = 'f';
-      const sp = document.createElement('span');
-      sp.textContent = f.label;
-      lab.appendChild(sp);
-      let inp;
-      if (f.sel) {
-        inp = document.createElement('select');
-        ['', '未確認', '確認済み', '架空'].forEach((o) => { const op = document.createElement('option'); op.value = o; op.textContent = o || '（未選択）'; inp.appendChild(op); });
-      } else {
-        inp = document.createElement('input');
-        inp.type = 'text'; inp.autocomplete = 'off';
-        if (f.num) inp.inputMode = 'decimal';
-      }
-      inp.name = f.k;
-      inp.value = init[f.k] || '';
-      if (f.k === 'id' && state.editId != null) inp.readOnly = true;
-      if (f.k === 'dLat' || f.k === 'lLat') {
-        inp.addEventListener('change', () => {
-          const m = inp.value.match(/(-?\d+(?:\.\d+)?)\s*[,、\s]\s*(-?\d+(?:\.\d+)?)/);
-          if (m) { inp.value = m[1]; fSet(f.k === 'dLat' ? 'dLng' : 'lLng', m[2]); }
-        });
-      }
-      lab.appendChild(inp);
-      body.appendChild(lab);
+      body.appendChild(mkField(f, init[f.k], f.k === 'id' && state.editId != null));
+      if (!f.geo) return;
+      const p = document.createElement('p');
+      p.id = 'ed-geo'; p.className = 'small';
+      p.textContent = validPlace({ lat: parseFloat(init.dLat), lng: parseFloat(init.dLng) }) ? '座標: ' + init.dLat + ', ' + init.dLng : '';
+      body.appendChild(p);
+      const d = document.createElement('details');
+      d.id = 'ed-manual';
+      const sm = document.createElement('summary');
+      sm.textContent = '座標を手動で直す';
+      d.appendChild(sm);
+      d.appendChild(mkField({ k: 'dLat', label: '緯度', num: 1 }, init.dLat));
+      d.appendChild(mkField({ k: 'dLng', label: '経度', num: 1 }, init.dLng));
+      body.appendChild(d);
+      fEl('dAddr').addEventListener('change', () => { const a = fVal('dAddr'); if (a) geocodeInto(a); });
+      ['dLat', 'dLng'].forEach((k) => fEl(k).addEventListener('input', () => { state.geoFor = fVal('dAddr'); }));
     });
   }
   function openEditor(id) {
@@ -491,12 +491,13 @@
     let init = {};
     if (state.editId != null) {
       const row = csv.rows.find((r) => String(r[idx.id] || '').trim() === state.editId);
-      Object.keys(COLS).forEach((k) => { init[k] = row && idx[k] >= 0 ? String(row[idx[k]] || '') : ''; });
+      Object.keys(COLS).forEach((k) => { init[k] = row && idx[k] >= 0 ? String(row[idx[k]] || '').trim() : ''; });
     } else {
-      const c = map.getCenter();
-      init = { id: 'card-' + Date.now().toString(36), dLat: c.lat.toFixed(6), dLng: c.lng.toFixed(6), dSt: '未確認', checked: today() };
+      init = { id: 'card-' + Date.now().toString(36) };
     }
-    $('#ed-title').textContent = state.editId != null ? 'カードを編集' : 'カードを追加（地図の中心が配布場所の座標に入ります）';
+    state.geoFor = init.dAddr || '';
+    state.initAddr = init.dAddr || '';
+    $('#ed-title').textContent = state.editId != null ? 'カードを編集' : 'カードを追加';
     $('#ed-del').hidden = state.editId == null;
     $('#ed-err').textContent = '';
     buildForm(init);
@@ -513,23 +514,32 @@
   async function saveCard(remove) {
     const err = $('#ed-err');
     err.textContent = '';
-    const vals = {};
-    FORM.forEach((f) => { if (f.k) vals[f.k] = fVal(f.k); });
     const isNew = state.editId == null;
-    const id = isNew ? vals.id : state.editId;
-    if (!remove) {
+    const id = isNew ? fVal('id') : state.editId;
+    if (remove) {
+      if (!confirm('このカードをCSVから削除します。よろしいですか？')) return;
+    } else {
       if (!id) { err.textContent = 'カードIDを入力してください。'; return; }
       if (isNew && !/^[\w.\-]+$/.test(id)) { err.textContent = 'カードIDは半角英数字・ハイフン・アンダースコア・ドットだけにしてください。'; return; }
-      if (!vals.name) { err.textContent = 'カード名称を入力してください。'; return; }
-      if (!validPlace({ lat: parseFloat(vals.dLat), lng: parseFloat(vals.dLng) })) { err.textContent = '配布場所の緯度・経度を数値で入力してください。'; return; }
-      const hasL = vals.lLat !== '' || vals.lLng !== '';
-      if (hasL && !validPlace({ lat: parseFloat(vals.lLat), lng: parseFloat(vals.lLng) })) { err.textContent = '蓋の緯度・経度は、両方を数値で入力するか、両方を空欄にしてください。'; return; }
-    } else if (!confirm('このカードをCSVから削除します。よろしいですか？')) return;
+      if (!fVal('name')) { err.textContent = 'カード名称を入力してください。'; return; }
+      if (!fVal('dAddr')) { err.textContent = '配布場所・住所を入力してください。'; return; }
+    }
     const gh = getGh();
     if (!gh) { err.textContent = '先に左上の ⚙ でGitHub連携を設定してください。'; return; }
     const btns = ['#ed-save', '#ed-del', '#ed-cancel'].map($);
     btns.forEach((b) => { b.disabled = true; });
     try {
+      let vals = null;
+      if (!remove) {
+        const addr = fVal('dAddr');
+        const coordOk = () => validPlace({ lat: parseFloat(fVal('dLat')), lng: parseFloat(fVal('dLng')) });
+        if (addr !== state.geoFor || !coordOk()) {
+          if (!(await geocodeInto(addr))) { $('#ed-manual').open = true; throw new Error('住所から座標を取得できませんでした。住所を詳しくするか、「座標を手動で直す」に入力してください'); }
+        }
+        if (!coordOk()) throw new Error('緯度・経度が正しくありません');
+        vals = { id, name: fVal('name'), dAddr: addr, dLat: fVal('dLat'), dLng: fVal('dLng'), src: fVal('src') };
+        if (isNew || addr !== state.initAddr) { vals.dSt = '未確認'; vals.checked = today(); }
+      }
       const { csv, sha } = await ghGetCsv(gh);
       ensureColumns(csv);
       const idx = colIdx(csv.head);
